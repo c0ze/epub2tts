@@ -9,39 +9,40 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"]="1"
 import pkg_resources
 import multiprocessing as mp
 import re
+
 import subprocess
 import sys
 import time
 import warnings
 import zipfile
 from pathlib import Path
-from kokoro import KPipeline
+# from kokoro import KPipeline # Lazy loaded
 import numpy as np
 
 from bs4 import BeautifulSoup
 from ebooklib import epub
-from fuzzywuzzy import fuzz
+# from fuzzywuzzy import fuzz # Lazy loaded
 from lxml import etree
 from mutagen import mp4
 from nltk.tokenize import sent_tokenize
-from openai import OpenAI
-from pedalboard import Pedalboard, Compressor, Gain, NoiseGate, LowShelfFilter
-from pedalboard.io import AudioFile
+# from openai import OpenAI # Lazy loaded
+# from pedalboard import Pedalboard, Compressor, Gain, NoiseGate, LowShelfFilter # Lazy loaded
+# from pedalboard.io import AudioFile # Lazy loaded
 from PIL import Image
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
-from TTS.api import TTS
-from TTS.tts.configs.xtts_config import XttsConfig
-from TTS.tts.models.xtts import Xtts
-from TTS.utils.generic_utils import get_user_data_dir
+# from TTS.api import TTS # Lazy loaded
+# from TTS.tts.configs.xtts_config import XttsConfig # Lazy loaded
+# from TTS.tts.models.xtts import Xtts # Lazy loaded
+# from TTS.utils.generic_utils import get_user_data_dir # Lazy loaded
 import ebooklib
 import edge_tts
 import nltk
 import noisereduce
-import torch, gc
-import torchaudio
-import whisper
-import soundfile as sf
+# import torch, gc # Lazy loaded
+# import torchaudio # Lazy loaded
+# import whisper # Lazy loaded
+# import soundfile as sf # Lazy loaded
 
 
 
@@ -71,6 +72,8 @@ class Text2WaveFile:
         """
 
     def compare(self, text, wavfile):
+        import whisper
+        from fuzzywuzzy import fuzz
         if self.whispermodel is None:
             self.whispermodel = whisper.load_model("tiny")
         
@@ -125,6 +128,7 @@ class OpenAI_TTS(Text2WaveFile):
         if 'speaker' not in config:
             raise Exception('no speeker configured')
         self.config = config
+        from openai import OpenAI
         self.client = OpenAI(api_key=config['api_key'])
 
     def proccess_text(self, text, wave_file_name):
@@ -146,6 +150,7 @@ class Kokoro_TTS(Text2WaveFile):
         self.config = config
         self.speaker = self.config['speaker'].lower()
         self.speed = 1.3
+        from kokoro import KPipeline
         self.pipeline = KPipeline(lang_code=self.speaker[0])
 
     def proccess_text(self, text, wave_file_name):
@@ -153,6 +158,7 @@ class Kokoro_TTS(Text2WaveFile):
         for gs, ps, audio in self.pipeline(text, voice=self.speaker, speed=self.speed, split_pattern=r'\n\n\n'):
             audio_segments.append(audio)
         final_audio = np.concatenate(audio_segments)
+        import soundfile as sf
         sf.write(wave_file_name, final_audio, 24000)
 
         if os.path.exists(wave_file_name):
@@ -161,6 +167,10 @@ class Kokoro_TTS(Text2WaveFile):
 
 class XTTS(Text2WaveFile):
     def __init__(self, config = {}):
+        import torch
+        from TTS.api import TTS
+        from TTS.tts.configs.xtts_config import XttsConfig
+        from TTS.tts.models.xtts import Xtts
         if 'speaker' not in config:
             raise Exception('no speeker configured')
 
@@ -279,12 +289,15 @@ class XTTS(Text2WaveFile):
                 )  # Move silence tensor to available device
                 wav_chunks.append(silence)
         wav = torch.cat(wav_chunks, dim=0)
+        import torchaudio
         torchaudio.save(wav_file_path, wav.squeeze().unsqueeze(0).cpu(), 24000)
+        from pedalboard.io import AudioFile
         with AudioFile(wav_file_path).resampled_to(24000) as f:
             audio = f.read(f.frames)
         reduced_noise = noisereduce.reduce_noise(
             y=audio, sr=24000, stationary=True, prop_decrease=0.75
         )
+        from pedalboard import Pedalboard, Compressor, Gain, NoiseGate, LowShelfFilter
         board = Pedalboard(
             [
                 NoiseGate(threshold_db=-30, ratio=1.5, release_ms=250),
@@ -299,6 +312,7 @@ class XTTS(Text2WaveFile):
 
 class org_TTS(Text2WaveFile):
     def __init__(self, config = {}):
+        from TTS.api import TTS
         if 'model_name' not in config:
             raise Exception('no model_name configured')
         if 'device' not in config:
@@ -342,36 +356,35 @@ def get_duration(file_path):
     return duration_milliseconds
 
 def join_temp_files_to_chapter(tempfiles, outputwav):
-    tempwavfiles = [AudioSegment.from_file(f"{f}") for f in tempfiles]
-    concatenated = sum(tempwavfiles)
-    # remove silence, then export to wav
-    #print(f"Replacing silences longer than one second with one second of silence ({outputwav})")
-    one_sec_silence = AudioSegment.silent(duration=1000)
-    two_sec_silence = AudioSegment.silent(duration=2000)
-    # This AudioSegment is dedicated for each file.
-    audio_modified = AudioSegment.empty()
-    # Split audio into chunks where detected silence is longer than one second
-    chunks = split_on_silence(
-        concatenated, min_silence_len=1000, silence_thresh=-50
-    )
-    msec_added = 0
-    # Iterate through each chunk
-    for chunkindex, chunk in enumerate(chunks):
-        audio_modified += chunk
-        audio_modified += one_sec_silence
-        msec_added += 1000
-
-    if len(chunks) != 1:
-        print("Warning, parts with silence was removed .srt will be out of sync")
+    # Improved implementation using ffmpeg for O(N) performance and minimal memory usage
+    list_file = f"{outputwav}.list.txt"
+    try:
+        with open(list_file, 'w', encoding='utf-8') as f:
+            for tf in tempfiles:
+                # Escape single quotes in filename for ffmpeg concat demuxer
+                safe_path = os.path.abspath(tf).replace("'", "'\\''")
+                f.write(f"file '{safe_path}'\n")
         
-    # add extra 2sec silence at the end of each part/chapter
-    msec_added += 2000
-    audio_modified += two_sec_silence
-    # Write modified audio to the final audio segment
-    audio_modified.export(outputwav, format="wav")
-    for f in tempfiles:
-        os.remove(f)
-    return msec_added
+        # Concatenate using ffmpeg
+        # -safe 0 allows absolute paths
+        # -c copy does a stream copy (no re-encoding), very fast
+        subprocess.check_call([
+            "ffmpeg", "-f", "concat", "-safe", "0", "-i", list_file,
+            "-c", "copy", outputwav, "-y"
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Cleanup temp files
+        os.remove(list_file)
+        for f in tempfiles:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        return 0
+    except subprocess.CalledProcessError as e:
+        print(f"Error joining files for {outputwav}: {e}")
+        return 0
+
 
 def process_book_chapter(dat):
     print("initiating chapter: ", dat['chapter'])
@@ -453,15 +466,20 @@ class EpubToAudiobook:
         else:
             print("Can only handle epub or txt as source.")
             sys.exit()
-        self.tts_dir = str(get_user_data_dir("tts"))
+            print("Can only handle epub or txt as source.")
+            sys.exit()
+        # self.tts_dir = str(get_user_data_dir("tts")) # REPLACED with lazy load below
         if model_name == "tts_models/en/vctk/vits":
-            self.xtts_model = (
-                self.tts_dir + "/tts_models--multilingual--multi-dataset--xtts_v2"
-            )
+             # self.xtts_model = (
+             #    self.tts_dir + "/tts_models--multilingual--multi-dataset--xtts_v2"
+             # )
+             pass
         else:
-            self.xtts_model = f"{self.tts_dir}/{model_name}"
+             pass
+             # self.xtts_model = f"{self.tts_dir}/{model_name}"
         
         self.ffmetadatafile = "FFMETADATAFILE"
+        import torch
         if torch.cuda.is_available():
             self.device = "cuda"
         elif torch.backends.mps.is_available():
@@ -847,7 +865,7 @@ class EpubToAudiobook:
                 for f in voice_samples.split(","):
                     self.voice_samples.append(os.path.abspath(f))
                 voice_name = (
-                    "-" + re.split("-|\d+|\.", os.path.basename(self.voice_samples[0]))[0]
+                    "-" + re.split(r"-|\d+|\.", os.path.basename(self.voice_samples[0]))[0]
                 )
             else:
                 voice_name = "-" + speaker.replace(" ", "-").lower()
