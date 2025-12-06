@@ -358,6 +358,9 @@ def get_duration(file_path):
 def join_temp_files_to_chapter(tempfiles, outputwav):
     # Improved implementation using ffmpeg for O(N) performance and minimal memory usage
     list_file = f"{outputwav}.list.txt"
+    # [Directory] Ensure list_file doesn't create a mess if outputwav is in temp
+    # Actually outputwav already includes "temp/" path now, so .list.txt will be in temp too.
+    # But let's be explicit if needed. It's fine as is.
     try:
         with open(list_file, 'w', encoding='utf-8') as f:
             for tf in tempfiles:
@@ -434,6 +437,7 @@ class EpubToAudiobook:
         skip_cleanup,
         audioformat,
         speed,
+        sample=False,
     ):
         self.source = source
         self.bookname = os.path.splitext(os.path.basename(source))[0]
@@ -453,8 +457,10 @@ class EpubToAudiobook:
         self.chapters_to_read = []
         self.section_names = []
         self.section_speakers = []
+        self.section_speakers = []
         self.no_deepspeed = no_deepspeed
         self.skip_cleanup = skip_cleanup
+        self.sample = sample
         self.title = self.bookname
         self.author = "Unknown"
         self.audioformat = [i.lower() for i in audioformat.split(",")]
@@ -872,10 +878,20 @@ class EpubToAudiobook:
         else:
             voice_name = "-" + speaker
         self.output_filename = re.sub(".m4b", voice_name + ".m4b", self.output_filename)
+        # [Directory] Put final output in output/
+        if not os.path.exists("output"):
+             os.makedirs("output")
+        self.output_filename = os.path.join("output", os.path.basename(self.output_filename))
+
         print(f"Saving to {self.output_filename}")
         self.check_for_file(self.output_filename)
         total_chars = self.get_length(self.start, self.end, self.chapters_to_read)
         print(f"Total characters: {total_chars}")
+        
+        if total_chars == 0:
+            print("Error: No text found in this book. Please check if the file is valid or if it's a DRM-protected file.")
+            sys.exit()
+
         if engine == "openai":
             while True:
                 openai_sdcost = (total_chars / 1000) * 0.015
@@ -898,11 +914,33 @@ class EpubToAudiobook:
         files = []
         position = 0
         start_time = time.time()
+        if self.sample:
+            # Find the first substantial chapter (heuristic: > 1000 chars)
+            found_start = False
+            for i in range(self.start, self.end):
+                if len(self.chapters_to_read[i]) > 1000:
+                    self.start = i
+                    self.end = i + 1  # Only process this one chapter
+                    found_start = True
+                    print(f"Sample mode: Starting exactly at chapter {i+1} (length {len(self.chapters_to_read[i])} chars)")
+                    break
+            if not found_start:
+                print("Could not find a substantial chapter for sampling. Defaulting to first requested chapter.")
+                self.end = self.start + 1
+
         print(f"Reading from {self.start + 1} to {self.end}")
         chapter_job_que = []
+        
+        # [Directory] Ensure directories exist
+        if not os.path.exists("temp"):
+            os.makedirs("temp")
+        if not os.path.exists("output"):
+            os.makedirs("output")
+
         for partnum, i in enumerate(range(self.start, self.end)):
             sentene_job_que = []
-            outputwav = f"{self.bookname}-{i + 1}.wav"
+            # [Directory] Put chapter wavs in temp
+            outputwav = os.path.join("temp", f"{self.bookname}-{i + 1}.wav")
             files.append(outputwav)
             if os.path.isfile(outputwav):
                 print(f"{outputwav} exists, skipping to next chapter")
@@ -974,7 +1012,8 @@ class EpubToAudiobook:
                     if not any(char.isalnum() for char in sentence_groups[x]):
                         continue
                     retries = 2
-                    tempwav = "temp"+ str(partnum)+ "_" + str(x) + ".wav"
+                    # [Directory] Put temp chunks in temp
+                    tempwav = os.path.join("temp", "temp"+ str(partnum)+ "_" + str(x) + ".wav")
                     tempflac = tempwav.replace("wav", "flac")
 
                     if os.path.isfile(tempwav):
@@ -982,7 +1021,18 @@ class EpubToAudiobook:
                     else:
                         sentene_job_que.append((sentence_groups[x], tempwav))
                     tempfiles.append(tempwav)
+
+                    # [--sample] Limit to 3 sentences if in sample mode
+                    if self.sample and len(tempfiles) >= 3:
+                        print("Sample limit reached (3 sentences). Stopping chapter processing.")
+                        break
+
                 chapter_job_que.append(({'config': config, 'tempfiles': tempfiles, 'sentene_job_que': sentene_job_que, 'outputwav': outputwav, 'chapter': chapter_name}))
+                
+                # [--sample] Break main loop after one chapter
+                if self.sample:
+                    print("Sample mode: Stopping after first substantial chapter.")
+                    break
 
         print("initiating work:")
         
@@ -996,12 +1046,15 @@ class EpubToAudiobook:
             if os.path.isfile(filename):
                 files2.append(filename)
         files = files2
+        files = files2
         outputm4a = self.output_filename.replace("m4b", "m4a")
-        filelist = "filelist.txt"
+        # [Directory] list file in temp
+        filelist = os.path.join("temp", "filelist.txt")
         with open(filelist, "w") as f:
             for filename in files:
-                filename = filename.replace("'", "'\\''")
-                f.write(f"file '{filename}'\n")
+                # Use absolute paths to avoid confusion with where filelist.txt is stored vs where input files are
+                abs_filename = os.path.abspath(filename).replace("'", "'\\''")
+                f.write(f"file '{abs_filename}'\n")
 
         with open(self.output_filename+".srt", "w", encoding='utf8') as srt:
             chapter_ofset = 0
@@ -1086,7 +1139,7 @@ class EpubToAudiobook:
                 self.output_filename,
             ]
             subprocess.run(ffmpeg_command)
-            if not self.debug: # Leave the files if debugging
+            if not self.debug and os.path.exists(outputm4a): # Leave the files if debugging
                 os.remove(outputm4a)
         if not self.debug: # Leave the files if debugging
             os.remove(filelist)
@@ -1148,8 +1201,15 @@ def main():
         "--threads",
         type=int,
         default=1,
-        help="Number of threads to use, if using cuda threading is disabled as it does not make things faster since you are limited by the GPU",
+        help="Number of threads to use",
     )
+    parser.add_argument(
+        "--sample",
+        action="store_true",
+        help="Process only a few sentences from the first substantial chapter for testing",
+    )
+
+
     parser.add_argument(
         "--end",
         type=int,
@@ -1263,6 +1323,7 @@ def main():
         skip_cleanup=args.skip_cleanup,
         audioformat=args.audioformat,
         speed=args.speed,
+        sample=args.sample,
     )
 
     print(f"Language selected: {mybook.language}")
