@@ -673,6 +673,13 @@ class EpubToAudiobook:
         #if there was no ncx file we asume the one file per chaper style of epub
         if len(chaper_file_index) == 0:
             one_chapter_per_file = True
+        else:
+             # Check if NCX yielded any actual text
+             total_ncx_chars = sum(len(c[0]) for c in self.chapters)
+             if total_ncx_chars < 500:
+                 print("NCX yielded minimal text, falling back to all documents scanning.")
+                 one_chapter_per_file = True
+                 self.chapters = []
 
         if one_chapter_per_file:
             for item in self.book.get_items():
