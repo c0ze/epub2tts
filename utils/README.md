@@ -1,7 +1,7 @@
 This is for fine tuning an XTTS v2 model.
 
 * Set up a virtual environment for fine tuning
-* * `python -m venv .venv; source .venv/bin/activate`
+* * `uv venv --python 3.11 .venv; source .venv/bin/activate`
 * Clone the right branch and install requirements
 * * `sh ./install_reqs.sh`
 * Run gradio
