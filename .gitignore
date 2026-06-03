@@ -29,3 +29,16 @@ pip-log.txt
 .tox
 
 .python-version
+
+# Generated audiobooks / runtime outputs
+output/
+*.m4b
+*.srt
+
+# Debug / scratch
+debug_*.py
+debug_output.txt
+edge_voices.txt
+
+# Editor/tooling
+pyrightconfig.json
