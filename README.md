@@ -150,12 +150,12 @@ brew install espeak pyenv ffmpeg mecab
 #install epub2tts
 git clone https://github.com/aedocw/epub2tts
 cd epub2tts
-pyenv install 3.11
-pyenv local 3.11
+uv python install 3.11
+uv venv --python 3.11 .venv
 #OPTIONAL but recommended - install this in a virtual environment
-pip install coqui-tts --only-binary spacy
-python -m venv .venv && source .venv/bin/activate
-pip install .
+source .venv/bin/activate
+uv pip install coqui-tts --only-binary spacy
+uv pip install .
 ```
 </details>
 
@@ -174,8 +174,10 @@ sudo apt install nvidia-cuda-toolkit
 #clone the repo
 git clone https://github.com/aedocw/epub2tts
 cd epub2tts
-pip install coqui-tts --only-binary spacy
-pip install .
+uv venv --python 3.11 .venv
+source .venv/bin/activate
+uv pip install coqui-tts --only-binary spacy
+uv pip install .
 ```
 
 **NOTE:** If you have deepspeed installed, it may be detected but not work properly, causing errors. Try [installing CUDA toolkit](https://developer.nvidia.com/cuda-downloads) to see if that resolves the issue. If that does not fix it, add `--no-deepspeed` and it will not be used. Also in that case, open an issue with your details and we will look into it.
@@ -194,21 +196,21 @@ Running epub2tts in WSL2 with Ubuntu 22 is the easiest approach, but these steps
 5. Install python 3.11 with the command `choco install python311`
 6. Install git with the command `choco install git`.
 7. Decide where you want your epub2tts project to live, documents is a common place. Once you've found a directory you're happy with, clone the project with `git clone https://github.com/aedocw/epub2tts` and cd epub2tts so you're now in your working directory.
-8. There are probably a few different ways you can go here, I personally opted for a venv to keep everything organized. Create a venv with the command `python -m venv .venv`
+8. There are probably a few different ways you can go here, I personally opted for a venv to keep everything organized. Create a venv with the command `uv venv --python 3.11 .venv`
 9. Activate the venv, on windows the command is slightly different as you issue `.venv\scripts\activate`
-10. Install epub2tts along with the requirements with the commands `pip install coqui-tts --only-binary spacy && pip install .`
+10. Install epub2tts along with the requirements with the commands `uv pip install coqui-tts --only-binary spacy && uv pip install .`
 
-11. If all goes well, you should be able to call epub2tts from within your venv and update it from this directory going forward. To update, use `git pull` and then `pip install . --upgrade`
+11. If all goes well, you should be able to call epub2tts from within your venv and update it from this directory going forward. To update, use `git pull` and then `uv pip install . --upgrade`
 
 **Some errors you may encounter**
 * Encountered error while trying to install package lxml
-  * Run `pip install lxml` to install the latest version manually then re-run `pip install .`
+  * Run `uv pip install lxml` to install the latest version manually then re-run `uv pip install .`
 * ffmpeg not found
   * Rerun the command `choco install ffmpeg``, making sure you are in an elevated powershell session, outside of the virtual environment
 * NLTK: punkt not found
   * Run the following to install it: `python -c "import nltk"` then `python -m nltk.downloader punkt`
 * Torch not compiled with CUDA enabled
-  * `pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121`
+  * `uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121`
 * If you have deepspeed installed, it may be detected but not work properly, causing errors. If that is the case, add `--no-deepspeed` and it will not be used.
 
 </details>
@@ -253,13 +255,13 @@ docker run --rm --gpus all -e COQUI_TOS_AGREED=1 -e CUDA_HOME=/usr/local/cuda -v
 git clone https://github.com/aedocw/epub2tts
 cd epub2tts
 #create a virtual environment
-python -m venv .venv
+uv venv --python 3.11 .venv
 #activate the virtual environment
 source .venv/bin/activate
 #install dependencies
 sudo apt install espeak-ng ffmpeg
-pip install coqui-tts --only-binary spacy
-pip install -r requirements.txt
+uv pip install coqui-tts --only-binary spacy
+uv pip install -r requirements.txt
 ```
 </details>
 
@@ -272,7 +274,7 @@ pip install -r requirements.txt
 1. cd to repo directory
 2. `git pull`
 3. Activate virtual environment you installed epub2tts in if you installed in a virtual environment
-4. `pip install . --upgrade`
+4. `uv pip install . --upgrade`
 </details>
 
 
